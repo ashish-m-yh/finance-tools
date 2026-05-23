@@ -3,6 +3,7 @@ Fintech prototypes
 
 This repository contains various tools useful for problems in the Banking and Financial Services domain. Some of these could spin off into separate standalone projects.
 
+```json
 [
   {
     "company": "Stripe",
@@ -40,3 +41,4 @@ This repository contains various tools useful for problems in the Banking and Fi
     "recommended_sales_angle": "Target HR solutions, workplace tools, security solutions for growing teams, or office infrastructure services"
   }
 ]
+```
