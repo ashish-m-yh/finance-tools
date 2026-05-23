@@ -3,6 +3,12 @@ Fintech prototypes
 
 This repository contains various tools useful for problems in the Banking and Financial Services domain. Some of these could spin off into separate standalone projects.
 
+# company-signals.py
+
+Generate market signals for a company from public data about the company.
+
+Here is an example for the Stripe company -
+
 ```json
 [
   {
