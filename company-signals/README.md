@@ -1,6 +1,6 @@
 # Company Signals
 
-*Company signals** are observable events or changes that indicate a company's current situation, priorities, or future needs.
+*Company signals* are observable events or changes that indicate a company's current situation, priorities, or future needs.
 
 Common types of signals include:
 
