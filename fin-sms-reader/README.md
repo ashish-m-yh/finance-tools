@@ -18,6 +18,7 @@ SMS-es are sent by banks and financial institutions.This information can be valu
 Example:
 
 SMS:
+
 042425 is the otp for txn of inr 4095.00 at akbar onli on your equitas debit card ending 0613 valid for 5 mins. please do not share the otp with anyone.
 
 ```json
