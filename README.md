@@ -23,8 +23,6 @@ For organizations requiring advanced capabilities, commercial extensions are ava
 * Fintech startups
 * Financial service providers
 * Lending platforms
-* Personal finance applications
-* Accounting and bookkeeping platforms
 * Banks and NBFCs
 * Data and analytics teams
 
