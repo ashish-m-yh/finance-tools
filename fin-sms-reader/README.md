@@ -1,6 +1,6 @@
 ## Usage
 
-python3 sms_test.py <filename>
+python3 sms_test.py &lt;filename&gt;
 
 ## Purpose
 
