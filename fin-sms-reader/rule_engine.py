@@ -5,17 +5,6 @@ import os
 from collections import OrderedDict
 from enum import Enum
 
-sms_parser_logger = None
-
-if 'SMS_APP_MODE' not in os.environ:
-    os.environ['SMS_APP_MODE'] = 'prod'
-
-if 'SMS_APP_MODE' in os.environ and os.environ['SMS_APP_MODE'] == 'prod':
-    from flask_init import labs_app
-    from common import ExceptionLogger
-
-    sms_parser_logger = labs_app.logger
-
 
 class AccountType(Enum):
     LOAN = 'loan'
@@ -44,14 +33,14 @@ class RuleAttributes(Enum):
 
 
 class TxnClasses(Enum):
-    CREDIT = 'credit'
-    DEBIT = 'debit'
+    INBOUND = 'inbound'
+    OUTBOUND = 'outbound'
 
 
 class RedFlags(Enum):
-    NO_FUNDS = 'info-red-nofunds'
-    NO_PAYMENT = 'info-red-payment'
-    LOAN_DEFAULT = 'info-red-loanDefault'
+    EMPTY_VALUE = 'info-flag-empty'
+    MISSING_PROCESS = 'info-flag-missing'
+    CRITICAL_DEFAULT = 'info-flag-default'
 
 
 class Overrides(Enum):
@@ -63,40 +52,29 @@ class Overrides(Enum):
 
 class RuleEngine(object):
     """
-    Part of SMS parsing and logic for rule engine extraction from a file.
+    Generalized pattern-matching engine for text analysis and data classification.
 
-    RuleEngine Class contains all the function for parsing out sms and Classifying it into multiple transaction
-    classes and extracting the transaction related information like amount, account , balance etc.
+    RuleEngine Class contains all the function for parsing out raw text entries and Classifying it into multiple 
+    transaction/entity classes and extracting relation information like metric, index, balance etc.
 
     Typical Usage
         >>> from rule_engine import RuleEngine
         >>> rule_engine_obj = RuleEngine(rules_file='/user/abc/Documents/rules.txt', bank_file='/user/abc/bank.json', acct_types_file='/usr/abc/acct_types.json')
-        >>> rule_engine_obj.run(sms='Sms Text', sender='VM-AIRBNK')
-
-    Attributes:-
-        - rules_file:- Destination to the rules_file in the format of a json object
-            `` { "class": "debit",
-            "pattern": "(inr|rs\\.?)\\s*([0-9\\.\\,]+).*?credited\\s+to\\s+your\\s+(.*?)card", \
-            "position": { "amount": 2 },
-            \"neg_pattern": "using\\s+card|credited\\s+to\\s+your\\s+a\\/c|credited\\s+to\\s+your\\s+account" } ``
-
-        - bank_file:- Destination to the bank ,mapping with it's abbrev.
-        - acct_types_file:- File to map patterns to different account types.
+        >>> rule_engine_obj.run(sms='Raw Text Content', sender='SOURCE_ID_01')
     """
     def __init__(self, rules_file, bank_file=None, acct_types_file=None, override_file=None):
-        self._rules = self._read_meta(rules_file)
+        self._rules = self._read_meta_config(rules_file)
 
         if bank_file:
-            self.bank_mapping = self._parse_mapping_file(bank_file)
+            self.bank_mapping = self._load_json_mapping(bank_file)
 
         if acct_types_file:
-            self.acct_types_mapping = self._parse_mapping_file(acct_types_file)
+            self.acct_types_mapping = self._load_json_mapping(acct_types_file)
 
         if override_file:
-            self.overrides = self._parse_mapping_file(override_file)
+            self.overrides = self._load_json_mapping(override_file)
 
-    # read rules JSON file
-    def _read_meta(self, filename):
+    def _read_meta_config(self, filename):
         lines = []
 
         try:
@@ -110,40 +88,35 @@ class RuleEngine(object):
 
         return lines
 
-    # read JSON configuration files
-    def _parse_mapping_file(self, filename):
+    def _load_json_mapping(self, filename):
         with open(filename, 'r') as fh:
             data = json.load(fh, object_pairs_hook=OrderedDict)
         return data
 
-    # this is the entry point from where all internal methods are called
     def run(self, sms, sender=None):
         info = None
-        sms = self._normalize_text(sms)
+        sms = self._clean_raw_text(sms)
 
-        info = self._match_rules(self._rules, sms)
-        info = self._result_post_process(info, sms)
+        info = self._execute_pattern_matching(self._rules, sms)
+        info = self._apply_post_processing_rules(info, sms)
 
         if sender:
             try:
-                bank_name = self._extract_bank_name(sender, self.bank_mapping)
+                bank_name = self._resolve_source_identity(sender, self.bank_mapping)
                 if isinstance(info, dict):
                     info[SmsAttributes.BANK_NAME.value] = bank_name
             except:
-                ExceptionLogger.print_and_log_exception(sms_parser_logger)
                 pass
 
         return info
 
-    # clean account no. and set account type here
-    def _clean_account_no(self, account_no, sms):
+    def _parse_and_validate_identifier(self, account_no, sms):
         sms = sms.replace('no.', 'no')
         normalized_acct_no = account_no.replace('no.', '').replace('no', '').strip()
         normalized_acct_no = re.sub(r'yes$|is$|has$|thru$|auth.*?$', '', normalized_acct_no.lower())
 
         acct_type = None
 
-        # try to identify if it is loan, card or bank a/c based on defined prefixes
         for acct_type_pat in self.acct_types_mapping:
             acct_type_pat = acct_type_pat.rstrip()
 
@@ -154,17 +127,16 @@ class RuleEngine(object):
                 if self.acct_types_mapping is not None and self.acct_types_mapping != '':
                     acct_type = self.acct_types_mapping[acct_type_pat]
 
-                    if (acct_type == AccountType.CARD.value):
-                        debit_cd_pattern1 = '.*? debit\\s*' + acct_type_pat + '\\s*' + re.escape(account_no) + '.*?'
-                        debit_cd_pattern2 = '.*? debit\\s*' + acct_type_pat + '\\s*' + re.escape(normalized_acct_no) + '.*?'
+                    if (acct_type == AccountType.BANK.value):
+                        debit_cd_pattern1 = '.*? virtual\\s*' + acct_type_pat + '\\s*' + re.escape(account_no) + '.*?'
+                        debit_cd_pattern2 = '.*? virtual\\s*' + acct_type_pat + '\\s*' + re.escape(normalized_acct_no) + '.*?'
 
                         if (re.match(debit_cd_pattern1, sms, re.IGNORECASE | re.MULTILINE) \
                             or re.match(debit_cd_pattern2, sms, re.IGNORECASE | re.MULTILINE)):
                                 acct_type = AccountType.DEBIT_CARD.value
                         else:
-                            if re.search('by\\s+debit\\s+card\\s+swipe', sms, re.IGNORECASE | re.MULTILINE):
+                            if re.search('by\\s+virtual\\s+access\\s+token', sms, re.IGNORECASE | re.MULTILINE):
                                 acct_type = AccountType.DEBIT_CARD.value
-
 
         normalized_acct_no = re.sub(r'\s+.*', '', normalized_acct_no)
         normalized_acct_no = re.sub(r'^[a-z]+$', '', normalized_acct_no)
@@ -187,7 +159,7 @@ class RuleEngine(object):
 
         return (normalized_acct_no, acct_type)
 
-    def _result_post_process(self, info, sms):
+    def _apply_post_processing_rules(self, info, sms):
         for number_field in [SmsAttributes.TXN_AMOUNT.value, SmsAttributes.BALANCE.value]:
             if number_field in info:
                 info[number_field] = info[number_field].replace(',', '')
@@ -200,33 +172,33 @@ class RuleEngine(object):
 
         txn_type = None
 
-        # credit to CC or loan account is actually a debit txn
+        # Check if account_type exists, is not None, and isn't purely empty whitespace
         if SmsAttributes.ACCOUNT_TYPE.value in info and info[SmsAttributes.ACCOUNT_TYPE.value] is not None and \
             info[SmsAttributes.ACCOUNT_TYPE.value].strip() != '':
             if (info[SmsAttributes.ACCOUNT_TYPE.value] == AccountType.LOAN.value or \
-            info[SmsAttributes.ACCOUNT_TYPE.value] == AccountType.CARD.value):
+            info[SmsAttributes.ACCOUNT_TYPE.value] == AccountType.BANK.value):
 
-                if SmsAttributes.CLASS.value in info and TxnClasses.CREDIT.value in info[SmsAttributes.CLASS.value]:
-                    info[SmsAttributes.CLASS.value].remove(TxnClasses.CREDIT.value)
+                if SmsAttributes.CLASS.value in info and TxnClasses.INBOUND.value in info[SmsAttributes.CLASS.value]:
+                    info[SmsAttributes.CLASS.value].remove(TxnClasses.INBOUND.value)
 
-                    if TxnClasses.DEBIT.value not in info[SmsAttributes.CLASS.value]:
-                        info[SmsAttributes.CLASS.value].append(TxnClasses.DEBIT.value)
+                    if TxnClasses.OUTBOUND.value not in info[SmsAttributes.CLASS.value]:
+                        info[SmsAttributes.CLASS.value].append(TxnClasses.OUTBOUND.value)
 
                 txn_type = info[SmsAttributes.ACCOUNT_TYPE.value]
         else:
-            # acccount type does not exist, so it could be a loan account which was not detected or bank account
-            # if classes are only loan classes, then definite loan account else bank account
             loan_classes = list(filter(lambda x: re.search('loan', x), info[SmsAttributes.CLASS.value]))
 
             if len(loan_classes) > 0:
                 info[SmsAttributes.ACCOUNT_TYPE.value] = AccountType.LOAN.value
+            else:
+                # Fallback addition: If empty/not found and not categorized as a loan, default to bank
+                info[SmsAttributes.ACCOUNT_TYPE.value] = AccountType.BANK.value
 
-        # In case of red flag due to non-payment, set if it is loan payment miss or any other
-        if SmsAttributes.CLASS.value in info and (RedFlags.NO_FUNDS.value in info[SmsAttributes.CLASS.value] or \
-            RedFlags.NO_PAYMENT.value in info[SmsAttributes.CLASS.value]):
+        if SmsAttributes.CLASS.value in info and (RedFlags.EMPTY_VALUE.value in info[SmsAttributes.CLASS.value] or \
+            RedFlags.MISSING_PROCESS.value in info[SmsAttributes.CLASS.value]):
 
             if not txn_type == AccountType.LOAN.value:
-                txn_type = 'other'
+                txn_type = 'alternative'
 
             if SmsAttributes.ATTR.value in info:
                 if SmsAttributes.LOAN_TYPE.value in info[SmsAttributes.ATTR.value]:
@@ -236,17 +208,14 @@ class RuleEngine(object):
             else:
                 info[SmsAttributes.ATTR.value] = {SmsAttributes.PAYMENT_TYPE.value: txn_type}
 
-            for rule_key in [TxnClasses.CREDIT.value, TxnClasses.DEBIT.value]:
+            for rule_key in [TxnClasses.INBOUND.value, TxnClasses.OUTBOUND.value]:
                 if rule_key in info[SmsAttributes.CLASS.value]:
                     info[SmsAttributes.CLASS.value].remove(rule_key)
 
-        # If loan default, then set added category of non-payment red flag
-        if SmsAttributes.CLASS.value in info and RedFlags.LOAN_DEFAULT.value in info[SmsAttributes.CLASS.value] \
-            and RedFlags.NO_PAYMENT.value not in info[SmsAttributes.CLASS.value]:
-            info[SmsAttributes.CLASS.value].append(RedFlags.NO_PAYMENT.value)
+        if SmsAttributes.CLASS.value in info and RedFlags.CRITICAL_DEFAULT.value in info[SmsAttributes.CLASS.value] \
+            and RedFlags.MISSING_PROCESS.value not in info[SmsAttributes.CLASS.value]:
+            info[SmsAttributes.CLASS.value].append(RedFlags.MISSING_PROCESS.value)
 
-        # there are some generic overrides so we don't have to set negative pattern for multiple rules
-        # eg. credit to beneficiary account is also a debit, certain kind of messages are not classified based on keywords/patterns
         if self.overrides is not None:
             for override_rule in self.overrides['override']:
                 if re.search(override_rule[Overrides.REGEX.value], sms, re.IGNORECASE | re.MULTILINE):
@@ -263,34 +232,27 @@ class RuleEngine(object):
 
         return info
 
-    # first step is to sanitize the message so that parsing is easier but without information loss
-    def _normalize_text(self, sms):
-        sms = sms.strip().replace("'", "").replace('"', '').replace('rs.', 'rs. ')\
-            .replace('inr.', 'inr ').replace('inr', 'inr ').replace('through', ' through')\
-            .replace('debited', ' debited').replace('credited', ' credited').replace('  ', ' ')
+    def _clean_raw_text(self, sms):
+        sms = sms.strip().replace("'", "").replace('"', '').replace('val.', 'val. ')\
+            .replace('item.', 'item ').replace('item', 'item ').replace('through', ' through')\
+            .replace('processed', ' processed').replace('assigned', ' assigned').replace('  ', ' ')
         return sms
 
-    # mutliple patterns may match to extract account no.
-    # but all matching rules may not give it in the correct form
-    # so we push them all into a set and return the most probabilistic one based on a simple rule (which is almost always right)
-    def _find_most_likely_acct_no(self, accounts_set, sms):
-        def _check(elt):
+    def _determine_highest_probability_match(self, accounts_set, sms):
+        def _evaluate_element_weight(elt):
             return len(elt.replace("\s+", "\s").split(' '))
 
-        likely_accts = sorted(accounts_set, key=_check)
+        likely_accts = sorted(accounts_set, key=_evaluate_element_weight)
         prob_acct = None
 
         for likely_acct in likely_accts:
-            prob_acct = self._clean_account_no(likely_acct, sms)
+            prob_acct = self._parse_and_validate_identifier(likely_acct, sms)
             if prob_acct is not None and prob_acct[0].strip() != '':
                 break
 
         return prob_acct
 
-    # match each rules which is a regex match associated with certain attributes and classes
-    # regex should be not too greedy but not too restricting either
-    # it may parse out multiple attributes as defined in the JSON config
-    def _match_rules(self, rule_list, sms):
+    def _execute_pattern_matching(self, rule_list, sms):
         info = {SmsAttributes.MATCHED_RULES.value: set(), SmsAttributes.CLASS.value: set()}
 
         i = 0
@@ -307,7 +269,7 @@ class RuleEngine(object):
                     rule = json.loads(rule_str)
                     match = re.search(rule[RuleAttributes.PATTERN.value], sms, re.IGNORECASE | re.MULTILINE)
                 except Exception as e:
-                    sys.stderr.write('Could not parse rule on line ' + str(i) + " " + rule_str + "\n")
+                    sys.stderr.write('Could not parse layout rule on line ' + str(i) + " " + rule_str + "\n")
 
                 if match is not None:
                     if RuleAttributes.NEG_PATTERN.value in rule:
@@ -327,7 +289,7 @@ class RuleEngine(object):
                             try:
                                 info[field] = parts[rule[RuleAttributes.POSITION.value][field]-1]
                             except Exception as e:
-                                sys.stderr.write(e)
+                                sys.stderr.write(str(e))
 
                     if SmsAttributes.ACCOUNT_NO.value in info and info[SmsAttributes.ACCOUNT_NO.value].strip() != '':
                         info[SmsAttributes.ACCOUNT_NO.value] = info[SmsAttributes.ACCOUNT_NO.value].replace(',', '')
@@ -336,7 +298,7 @@ class RuleEngine(object):
         account_no_exists = True
 
         if accounts_set is not None and len(accounts_set) > 0:
-            (prob_acct_no, prob_acct_type) = self._find_most_likely_acct_no(accounts_set, sms)
+            (prob_acct_no, prob_acct_type) = self._determine_highest_probability_match(accounts_set, sms)
 
             if prob_acct_type is None:
                 prob_acct_type = ''
@@ -361,11 +323,11 @@ class RuleEngine(object):
 
         return info
 
-    def _extract_bank_name(self, sender, bank_mapping):
+    def _resolve_source_identity(self, sender, bank_mapping):
         if isinstance(bank_mapping, list):
             for item in bank_mapping:
                 if str(item['string']).lower() in str(sender).lower():
-                    if item['Class'] == 'BankName':
+                    if item['Class'] == 'SourceName':
                         return item['Name']
                     else:
                         return sender[-6:]
