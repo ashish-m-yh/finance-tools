@@ -1,7 +1,17 @@
-# finance-tools
-Fintech prototypes
+# Company Signals
 
-This repository contains various tools useful for problems in the Banking and Financial Services domain. Some of these could spin off into separate standalone projects.
+*Company signals** are observable events or changes that indicate a company's current situation, priorities, or future needs.
+
+Common types of signals include:
+
+* **Growth signals** – hiring, funding, expansion
+* **Technology signals** – adoption of new tools or platforms
+* **Leadership signals** – new executives or management changes
+* **Financial signals** – acquisitions, revenue growth, cost-cutting
+* **Operational signals** – migrations, modernization projects, outages
+* **Compliance signals** – audits, certifications, regulatory initiatives
+
+Businesses use these signals to identify sales opportunities, investment prospects, partnership opportunities, recruiting targets, or consulting engagements. In simple terms, signals help answer: **"What is this company likely to need next?"**
 
 # company-signals.py
 
