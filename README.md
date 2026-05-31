@@ -29,3 +29,5 @@ For organizations requiring advanced capabilities, commercial extensions are ava
 ## Get in Touch
 
 Contact: **[ashishmukherjee@gmail.com](mailto:ashishmukherjee@gmail.com)**
+
+**LinkedIn:** https://www.linkedin.com/in/ashishindia/
