@@ -31,5 +31,3 @@ For organizations requiring advanced capabilities, commercial extensions are ava
 ## Get in Touch
 
 Contact: **[ashishmukherjee@gmail.com](mailto:ashishmukherjee@gmail.com)**
-
-This tends to convert better than simply listing features because it immediately tells GitHub visitors that paid offerings exist.
